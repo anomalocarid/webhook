@@ -24,7 +24,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
 DEALINGS IN THE SOFTWARE.
 """
-import time, json, sys
+import time, json, sys, re
 from multiprocessing import Pool, Process, Queue
 from datetime import datetime, timezone, timedelta, MINYEAR
 import requests
@@ -47,11 +47,17 @@ class Post:
         An optional further description of the article
     author:
         The name of the person or account which published or posted the article
+    author_url:
+        The URL of a profile, user page, or other page relating to the author
     location:
         Where the article was published, uploaded, or linked to.
         Example: a subreddit name
-    orig_url:
-        
+    location_url:
+        A link to where the article was linked to from.
+        Example: a subreddit post (comments)
+    link:
+        The URL to the article itself.
+    
     """
     def __init__(self, title, published, 
                  description='',
@@ -84,6 +90,19 @@ class Post:
             }
         }
         return embed
+
+class Filter:
+    def __init__(self, regex, 
+                 inclusive=True,
+                 is_case_sensitive=False):
+        flags = 0 if is_case_sensitive else re.I
+        
+        self.regex = re.compile(regex, flags)
+        self.inclusive = inclusive
+    
+    def matches(self, post):
+        b = bool(self.regex.search(post.title))
+        return b if self.inclusive else (not b)
 
 """
 Split out the actual content type from the content-type header.
@@ -197,16 +216,32 @@ if __name__ == "__main__":
     with open(config_file, "r") as f:
         config = json.load(f)
     
+    filters = []
+    for f in config.get('filters', []):
+        filt = Filter(regex=f.get('regex', ''), 
+                      inclusive=f.get('inclusive', True))
+        filters.append(filt)
+    
     post_queue = Queue()
     reddit_process = Process(target=reddit_main, args=(post_queue,config))
     reddit_process.start()
 
     while True:
         post = post_queue.get()
-        try:
-            post = post.make_discord_embed()
-            r = requests.post(config.get('webhook_url'), json={'embeds': [post]})
-        except Exception as e:
-            print("Something went wrong:", e)
-        time.sleep(5.0)
+        filtered = False
+        for filt in filters:
+            filtered = not filt.matches(post)
+            if filtered:
+                print('FILTER: removed post "{}"'.format(post.title))
+                break
+        
+        if not filtered:
+            print('POST: "{}"'.format(post.title))
+            try:
+                post = post.make_discord_embed()
+                r = requests.post(config.get('webhook_url'), 
+                                  json={'embeds': [post]})
+            except Exception as e:
+                print("Something went wrong:", e)
+            time.sleep(5.0)
     

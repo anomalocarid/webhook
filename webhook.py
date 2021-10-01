@@ -26,10 +26,12 @@ DEALINGS IN THE SOFTWARE.
 """
 import time, json, sys, re
 from multiprocessing import Pool, Process, Queue
+from dateutil.parser import parse as dateutil_parse
 from datetime import datetime, timezone, timedelta, MINYEAR
 import requests
 from bs4 import BeautifulSoup
 
+# URLs
 # Reddit
 REDDIT_URL = "https://www.reddit.com/"
 
@@ -140,7 +142,7 @@ def get_xml(url, config={}):
     return (soup, r, rate_info)
 
 """
-Convert a reddit entry to a discord post suitable for a webhook
+Convert a reddit entry to a Post object
 """
 def make_reddit_post(article):
     p = Post(title=article.get('title'),
@@ -151,6 +153,19 @@ def make_reddit_post(article):
              location_url=article.get('comments'),
              link=article.get('link'),
              description=article.get('description'))
+    return p
+
+"""
+Convert a generic RSS news feed entry to a Post object
+"""
+def make_news_post(article):
+    p = Post(title=article.get('title'),
+             published=article.get('published', datetime.now()),
+             author=article.get('author'),
+             link=article.get('link'),
+             description=article.get('description'),
+             location=article.get('location'),
+             location_url=article.get('location_url'))
     return p
 
 """
@@ -182,7 +197,7 @@ def get_reddit(url, config={}):
         if len(comments) > 0:
             comment = comments[0]['href']
             article['comments'] = comment
-            article['subreddit'] = comment.split('/')[4]
+            article['subreddit'] = '/r/{}'.format(comment.split('/')[4])
         # Make a description
         article['description'] = 'Posted by {} in {} <{}>.'.format(article.get('author'),
                                                                    article.get('subreddit'),
@@ -193,10 +208,35 @@ def get_reddit(url, config={}):
     return rate_info, articles
 
 """
+Parse a generic RSS feed
+"""
+def get_rss(url, config={}):
+    soup, resp, rate_info = get_xml(url, config)
+    
+    items = soup.findAll('item')
+    channel = soup.find('channel')
+    articles = []
+    for item in items:
+        article = {
+            'title': item.find('title').text,
+            'published': dateutil_parse(item.find('pubDate').text),
+            'description': item.find('description').text,
+            'link': item.find('link').text,
+            'location': channel.find('title').text,
+            'location_url': channel.find('link').text
+        }
+
+        articles.append(article)
+    
+    return rate_info, articles
+    
+
+"""
 Process main for Reddit scraping
 """
 def reddit_main(posts, config):
     updates = dict()
+    # can combine multiple subreddits into one request
     full_url = '{}r/{}/new/.rss'.format(REDDIT_URL, '+'.join(config.get('subreddits')))
     while True:
         try:
@@ -210,7 +250,26 @@ def reddit_main(posts, config):
         except Exception as e:
             print("Something went wrong:", e)
         time.sleep(60.0) # reddit is pretty slow, so take a break
-                
+
+def rss_main(posts, config):
+    updates = dict()
+    urls = config.get("feeds", [])
+    while True:
+        new_posts = []
+        for url in urls:
+            try:
+                rate_info, articles = get_rss(url, config)
+                latest = updates.get(url, datetime.now(timezone.utc) - timedelta(seconds=10))
+                new_posts += list(map(make_news_post,
+                             filter(lambda a: a['published'] > latest, articles)))
+                updates[url] = max([a['published'] for a in articles])
+                time.sleep(1.0)
+            except Exception as e:
+                print("Something went wrong:", e)
+        for post in new_posts:
+            posts.put(post)
+        time.sleep(60.0)
+
 if __name__ == "__main__":
     config_file = 'config.json' if len(sys.argv) < 2 else argv[1]
     with open(config_file, "r") as f:
@@ -225,6 +284,8 @@ if __name__ == "__main__":
     post_queue = Queue()
     reddit_process = Process(target=reddit_main, args=(post_queue,config))
     reddit_process.start()
+    rss_process = Process(target=rss_main, args=(post_queue, config))
+    rss_process.start()
 
     while True:
         post = post_queue.get()

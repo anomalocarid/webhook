@@ -34,7 +34,7 @@
             "type": "object",
             "properties": {
                 "regex": {
-                    "description": "A regular expression that defines the filter."
+                    "description": "A regular expression that defines the filter.",
                     "type": "string"
                 },
                 "combine": {

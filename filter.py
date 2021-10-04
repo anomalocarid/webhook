@@ -42,7 +42,7 @@ class CombinationFilter(FilterBase):
         Either 'and' or 'or'.
     """
     def __init__(self, filters=[], comb='and'):
-        self.filters = []
+        self.filters = filters
         if comb == 'and':
             self.op = operator.__and__
             self.base = True
@@ -74,6 +74,7 @@ class Filter(FilterBase):
                  is_case_sensitive=False):
         flags = 0 if is_case_sensitive else re.I
         
+        self.regex_str = regex
         self.regex = re.compile(regex, flags)
         self.inclusive = inclusive
     

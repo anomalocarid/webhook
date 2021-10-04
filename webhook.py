@@ -38,6 +38,9 @@ from filter import Filter
 # Reddit
 REDDIT_URL = "https://www.reddit.com/"
 
+# Default time to wait between checking for new posts, in seconds
+DEFAULT_CHECK_COOLDOWN = 60.0
+
 """
 Split out the actual content type from the content-type header.
 """
@@ -168,6 +171,8 @@ Process main for Reddit scraping
 """
 def reddit_main(posts, config):
     updates = dict()
+    check_cooldown = config.get('reddit_check_cooldown',
+                                config.get('check_cooldown', DEFAULT_CHECK_COOLDOWN))
     # can combine multiple subreddits into one request
     full_url = '{}r/{}/new/.rss'.format(REDDIT_URL, '+'.join(config.get('subreddits')))
     while True:
@@ -181,10 +186,12 @@ def reddit_main(posts, config):
                 posts.put(post)
         except Exception as e:
             print("Something went wrong:", e)
-        time.sleep(60.0) # reddit is pretty slow, so take a break
+        time.sleep(check_cooldown)
 
 def rss_main(posts, config):
     updates = dict()
+    check_cooldown = config.get('rss_check_cooldown',
+                                config.get('check_cooldown', DEFAULT_CHECK_COOLDOWN))
     urls = config.get("feeds", [])
     while True:
         new_posts = []

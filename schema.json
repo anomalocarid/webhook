@@ -1,0 +1,53 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://example.com/schemas/config",
+    "title": "Config",
+    "description": "Configuration for the webhook.py application.",
+    "type": "object",
+    "properties": {
+        "webhook_url": {
+            "description": "The URL of a Discord webhook to post to.",
+            "type": "string"
+        },
+        "user_agent": {
+            "description": "The user-agent header field to use when making requests.",
+            "type": "string"
+        },
+        "subreddits": {
+            "description": "A list of subreddits to scrape from. Do not include the /r/ prefix.",
+            "type": "array",
+            "items": {
+                "type": "string"
+            },
+            "uniqueItems": true
+        },
+        "feeds": {
+            "description": "A list of RSS feed URLs to scrape from.",
+            "type": "array",
+            "items": {
+                "type": "string"
+            },
+            "uniqueItems": true
+        },
+        "filter": {
+            "description": "The filter(s) to apply to scraped posts.",
+            "type": "object",
+            "properties": {
+                "regex": {
+                    "description": "A regular expression that defines the filter."
+                    "type": "string"
+                },
+                "combine": {
+                    "description": "The boolean operation used to combine a list of filters.",
+                    "type": "string"
+                },
+                "filters": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/properties/filter"
+                    }
+                }
+            }
+        }
+    }
+}

@@ -28,7 +28,8 @@ class Post:
                  description='',
                  author='', location='', 
                  link='', location_url='', 
-                 author_url=''):
+                 author_url='',
+                 **kwargs):
         self.title = title
         self.published = published
         self.description = description
@@ -55,3 +56,8 @@ class Post:
             }
         }
         return embed
+    
+    def __str__(self):
+        return "Post(location=\"{}\", title=\"{}\", published=\"{}\", url=\"{}\")".format(
+               self.location, self.title, self.published, self.link)
+                

@@ -26,13 +26,16 @@ DEALINGS IN THE SOFTWARE.
 """
 import time, json, sys, re
 from multiprocessing import Pool, Process, Queue
+import traceback
 from dateutil.parser import parse as dateutil_parse
+from dateutil.tz import gettz
 from datetime import datetime, timezone, timedelta, MINYEAR
 import requests
 from bs4 import BeautifulSoup
 
 from post import Post
 from filter import Filter
+from scraper import Scraper
 
 # URLs
 # Reddit
@@ -42,172 +45,41 @@ REDDIT_URL = "https://www.reddit.com/"
 DEFAULT_CHECK_COOLDOWN = 60.0
 
 """
-Split out the actual content type from the content-type header.
-"""
-def get_content_type(r):
-    return r.headers['content-type'].split(';')[0]
-
-def get_reddit_rss_urls():
-    return ["{}r/{}/new/.rss".format(REDDIT_URL, subreddit) for subreddit in SUBREDDITS]
-
-"""
-Do a simple HTTP GET request
-"""
-def get_http(url, config={}):
-    r = requests.get(url, headers={'user-agent': config.get('user_agent')})
-    
-    # rate-limit information in the headers
-    rate_info = {
-        'limit': r.headers.get('x-ratelimit-limit'),
-        'remaining': r.headers.get('x-ratelimit-remaining'),
-        'reset': r.headers.get('x-ratelimit-reset'),
-        'used': r.headers.get('x-ratelimit-used'),
-        'retry-at': r.headers.get('retry-at')
-    }
-    
-    return (r, rate_info)
-
-"""
-HTTP GET + set up an XML parser
-"""
-def get_xml(url, config={}):
-    r, rate_info = get_http(url, config)
-    
-    soup = BeautifulSoup(r.content, 'lxml-xml')
-    return (soup, r, rate_info)
-
-"""
-Convert a reddit entry to a Post object
-"""
-def make_reddit_post(article):
-    p = Post(title=article.get('title'),
-             published=article.get('published', datetime.now()),
-             author=article.get('author'),
-             author_url=article.get('author_url'),
-             location=article.get('subreddit'),
-             location_url=article.get('comments'),
-             link=article.get('link'),
-             description=article.get('description'))
-    return p
-
-"""
-Convert a generic RSS news feed entry to a Post object
-"""
-def make_news_post(article):
-    p = Post(title=article.get('title'),
-             published=article.get('published', datetime.now()),
-             author=article.get('author'),
-             link=article.get('link'),
-             description=article.get('description'),
-             location=article.get('location'),
-             location_url=article.get('location_url'))
-    return p
-
-"""
-Parse a reddit RSS feed
-"""
-def get_reddit(url, config={}):
-    soup, resp, rate_info = get_xml(url, config)
-    
-    entries = soup.findAll('entry')
-    articles = []
-    for entry in entries:
-        article = {
-            'title': entry.find('title').text,
-            'published': datetime.fromisoformat(entry.find('published').text),
-            'subreddit': ''
-        }
-        # Author information
-        author = entry.find('author')
-        article['author'] = author.find('name').text
-        article['author_url'] = author.find('uri').text
-        # Extract external link and link to comments from the post
-        content = BeautifulSoup(entry.find('content').text, "html.parser")
-        links = list(filter(lambda a: a.text == '[link]', content.findAll('a')))
-        if len(links) > 0:
-            link = links[0]['href']
-            article['link'] = link
-        comments = list(filter(lambda a: a.text == '[comments]', content.findAll('a')))
-        # Link to comments
-        if len(comments) > 0:
-            comment = comments[0]['href']
-            article['comments'] = comment
-            article['subreddit'] = '/r/{}'.format(comment.split('/')[4])
-        # Make a description
-        article['description'] = 'Posted by {} in {} <{}>.'.format(article.get('author'),
-                                                                   article.get('subreddit'),
-                                                                   article.get('comments'))
-        
-        articles.append(article)
-    
-    return rate_info, articles
-
-"""
-Parse a generic RSS feed
-"""
-def get_rss(url, config={}):
-    soup, resp, rate_info = get_xml(url, config)
-    
-    items = soup.findAll('item')
-    channel = soup.find('channel')
-    articles = []
-    for item in items:
-        article = {
-            'title': item.find('title').text,
-            'published': dateutil_parse(item.find('pubDate').text),
-            'description': item.find('description').text,
-            'link': item.find('link').text,
-            'location': channel.find('title').text,
-            'location_url': channel.find('link').text
-        }
-
-        articles.append(article)
-    
-    return rate_info, articles
-    
-
-"""
 Process main for Reddit scraping
 """
 def reddit_main(posts, config):
-    updates = dict()
     check_cooldown = config.get('reddit_check_cooldown',
                                 config.get('check_cooldown', DEFAULT_CHECK_COOLDOWN))
+    scraper = Scraper(source='reddit', config=config)
+    
     # can combine multiple subreddits into one request
     full_url = '{}r/{}/new/.rss'.format(REDDIT_URL, '+'.join(config.get('subreddits')))
     while True:
         try:
-            rate_info, articles = get_reddit(full_url, config)
-            latest = updates.get(full_url, datetime.now(timezone.utc) - timedelta(seconds=10)) 
-            new_posts = map(make_reddit_post, 
-                         filter(lambda a: a['published'] > latest, articles))
-            updates[full_url] = max([a['published'] for a in articles]) # use last updated article on reddit's side
-            for post in new_posts:
-                posts.put(post)
+            new_posts = scraper.get_url(full_url)
         except Exception as e:
-            print("Something went wrong:", e)
+            print(traceback.format_exc())
+            new_posts = []
+        for post in new_posts:
+            posts.put(post)
         time.sleep(check_cooldown)
 
 def rss_main(posts, config):
-    updates = dict()
     check_cooldown = config.get('rss_check_cooldown',
                                 config.get('check_cooldown', DEFAULT_CHECK_COOLDOWN))
+    scraper = Scraper(source='rss', config=config)
     urls = config.get("feeds", [])
     while True:
         new_posts = []
         for url in urls:
             try:
-                rate_info, articles = get_rss(url, config)
-                latest = updates.get(url, datetime.now(timezone.utc) - timedelta(seconds=10))
-                new_posts += list(map(make_news_post,
-                             filter(lambda a: a['published'] > latest, articles)))
-                updates[url] = max([a['published'] for a in articles])
+                new_posts += scraper.get_url(url)
                 time.sleep(5.0)
             except Exception as e:
-                print("Something went wrong:", e)
+                print(traceback.format_exc())
         for post in new_posts:
             posts.put(post)
-        time.sleep(60.0)
+        time.sleep(check_cooldown)
 
 if __name__ == "__main__":
     config_file = 'config.json' if len(sys.argv) < 2 else argv[1]
@@ -226,7 +98,7 @@ if __name__ == "__main__":
         post = post_queue.get()
         
         if filt.matches(post):
-            print('POST: "{}"'.format(post.title))
+            print('POST:', post)
             try:
                 post = post.make_discord_embed()
                 r = requests.post(config.get('webhook_url'), 
@@ -235,5 +107,5 @@ if __name__ == "__main__":
                 print("Something went wrong:", e)
             time.sleep(5.0)
         else:
-            print('FILTER: removed post "{}"'.format(post.title))
+            print('FILTER: removed post', post)
     

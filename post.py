@@ -25,19 +25,21 @@ class Post:
     
     """
     def __init__(self, title, published, 
-                 description='',
-                 author='', location='', 
-                 link='', location_url='', 
-                 author_url='',
+                 description=None,
+                 author=None, location=None, 
+                 link=None, location_url=None, 
+                 author_url=None,
+                 image=None,
                  **kwargs):
         self.title = title
         self.published = published
         self.description = description
         self.author = author
+        self.author_url = author_url
         self.location = location
         self.link = link
         self.location_url = location_url
-        self.author_url = author_url
+        self.image = image
     
     def make_discord_embed(self):
         embed = {
@@ -53,11 +55,15 @@ class Post:
             'provider': {
                 'name': self.location,
                 'url': self.location_url
+            },
+            'image': {
+                'url': self.image
             }
         }
         return embed
     
     def __str__(self):
-        return "Post(location=\"{}\", title=\"{}\", published=\"{}\", url=\"{}\")".format(
-               self.location, self.title, self.published, self.link)
+        return "{}\n\tPublished: {}\n\tAuthor: {} ({})\n\tLocation: {} ({})\n\tLink: {}\n\tDescription: {}".format(
+                self.title, self.published, self.author, self.author_url, self.location, 
+                self.location_url, self.link, self.description)
                 

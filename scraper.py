@@ -2,6 +2,8 @@ from datetime import datetime, timezone, timedelta
 import requests
 import sys
 import traceback
+from urllib.parse import urlparse, unquote
+from pathlib import Path
 
 from dateutil.parser import parse as dateutil_parse
 from dateutil.tz import gettz
@@ -73,7 +75,8 @@ class Scraper:
                 'author_url': self._get_author_url(item),
                 'location': self._get_location(item),
                 'location_url': self._get_location_url(item),
-                'description': self._get_description(item)
+                'description': self._get_description(item),
+                'image': self._get_image(item)
             }
             articles.append(item)
         
@@ -137,8 +140,7 @@ class Scraper:
     def _get_location_url(self, item):
         if self.source == 'reddit':
             if len(self._comments) > 0:
-                comment = self._comments[0]['href']
-                return '/r/{}'.format(comment.split('/')[4])
+                return self._comments[0]['href']
             else:
                 return None
         elif self.source == 'rss':
@@ -151,3 +153,13 @@ class Scraper:
                                                     self._get_location_url(item))
         elif self.source == 'rss':
             return item.find('description').text
+
+    def _get_image(self, item):
+        if self.source == 'reddit':
+            u = urlparse(self._get_link(item)).path
+            if Path(u).suffix[1:] in ['png', 'jpg', 'jpeg', 'jfif', 'gif']:
+                return self._get_link(item)
+            return None
+            
+        elif self.source == 'rss':
+            return None

@@ -119,7 +119,11 @@ class Scraper:
         if self.source == 'reddit':
             return item.find('author').find('name').text
         elif self.source == 'rss':
-            return None # TODO
+            creator = item.find('dc:creator')
+            if creator:
+                return creator.text
+            else:
+                return None
     
     def _get_author_url(self, item):
         if self.source == 'reddit':
@@ -160,6 +164,13 @@ class Scraper:
             if Path(u).suffix[1:] in ['png', 'jpg', 'jpeg', 'jfif', 'gif']:
                 return self._get_link(item)
             return None
-            
         elif self.source == 'rss':
-            return None
+            # Image specific to the article
+            media = item.find('media:content')
+            if media:
+                return media['url']
+            else:
+                # Generic image for the feed
+                img = self._channel.find('image')
+                if img:
+                    return img.find('url').text

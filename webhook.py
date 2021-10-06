@@ -27,11 +27,8 @@ DEALINGS IN THE SOFTWARE.
 import time, json, sys, re
 from multiprocessing import Pool, Process, Queue
 import traceback
-from dateutil.parser import parse as dateutil_parse
-from dateutil.tz import gettz
-from datetime import datetime, timezone, timedelta, MINYEAR
+import sqlite3
 import requests
-from bs4 import BeautifulSoup
 
 from post import Post
 from filter import Filter
@@ -86,6 +83,24 @@ if __name__ == "__main__":
     with open(config_file, "r") as f:
         config = json.load(f)
     
+    if 'database' in config:
+        conn = sqlite3.connect(config['database'])
+        cursor = conn.cursor()
+        cursor.execute("""CREATE TABLE IF NOT EXISTS articles (
+                            id integer PRIMARY KEY NOT NULL,
+                            title text NOT NULL,
+                            published text NOT NULL,
+                            description text,
+                            location text NOT NULL,
+                            location_url text,
+                            author text,
+                            author_url text,
+                            link text NOT NULL
+                          );
+                       """)
+        cursor.close()
+        conn.commit()
+    
     filt = Filter.FromConfig(config.get('filter', {}))
     
     post_queue = Queue()
@@ -98,7 +113,29 @@ if __name__ == "__main__":
         post = post_queue.get()
         
         if filt.matches(post):
-            print('POST:', post)
+            print('POST:', post.title)
+            if 'database' in config:
+                cursor = conn.cursor()
+                cursor.execute("""INSERT INTO articles(title, 
+                                                       published, 
+                                                       description,
+                                                       location,
+                                                       location_url,
+                                                       author,
+                                                       author_url,
+                                                       link)
+                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                               """,
+                               (post.title,
+                                post.published,
+                                post.description,
+                                post.location,
+                                post.location_url,
+                                post.author,
+                                post.author_url,
+                                post.link))
+                cursor.close()
+                conn.commit()
             try:
                 post = post.make_discord_embed()
                 r = requests.post(config.get('webhook_url'), 
@@ -107,5 +144,5 @@ if __name__ == "__main__":
                 print("Something went wrong:", e)
             time.sleep(5.0)
         else:
-            print('FILTER: removed post', post)
+            print('FILTER: removed post "{}"'.format(post.title))
     
